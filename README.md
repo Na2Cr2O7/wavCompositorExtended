@@ -5,7 +5,7 @@
 
 `wavCompositorExtended` 是一个功能增强型命令行音频合成工具，支持将多个 `.wav` 文件按时间线、音量增益精确混合，自动处理采样率差异，并输出高质量归一化音频。
 
-> 本项目基于原始 `wavCompositor` 修改而来，增加了对文件名含空格、命令行参数、重采样等功能的支持。
+> 本项目基于原始 [wavCompositor](https://github.com/Na2Cr2O7/wavableMidi/tree/main/wavCompositor) 修改而来，增加了对文件名含空格、命令行参数、重采样等功能的支持。
 
 ---
 
