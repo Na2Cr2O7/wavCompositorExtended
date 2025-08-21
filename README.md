@@ -1,3 +1,4 @@
+确保你的wav文件有采样率信息。
 # wavCompositorExtended
 
 ![License](https://img.shields.io/badge/license-GPLv3-red.svg)
