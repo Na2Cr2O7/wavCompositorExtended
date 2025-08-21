@@ -9,7 +9,7 @@
 #include <stdexcept>
 #include <cmath>
 
-
+//wavCompositorExtended
 
 // ✅ 正确的线性插值重采样
 template <typename T>
@@ -70,15 +70,17 @@ float safeStof(const std::string& str) {
     }
 }
 
-std::vector<AudioClip> parseInputFile(const std::string& filename) {
+std::vector<struct AudioClip> parseInputFile(const std::string& filename) {
     std::ifstream file(filename);
     if (!file.is_open()) {
-        throw std::runtime_error("Cannot open file: " + filename);
+        std::printf("Cannot open file: %s\n", filename.c_str());
+        throw std::runtime_error("Cannot open file");
     }
 
     std::vector<std::string> tokens;
     std::string line;
-    std::cout << "Reading " << filename << "\n";
+    std::printf("reading:%s\n", filename.c_str());
+
 
     while (std::getline(file, line)) {
         std::istringstream iss(line);
@@ -92,43 +94,41 @@ std::vector<AudioClip> parseInputFile(const std::string& filename) {
         throw std::runtime_error("Input file must contain groups of 3: <wavfile> <starttime> <volume>");
     }
 
-    std::vector<AudioClip> clips;
+    std::vector<struct AudioClip> clips;
+    std::printf("File name\tVolume|Start time\n");
     for (size_t i = 0; i < tokens.size(); i += 3) {
-        AudioClip clip;
+        struct AudioClip clip;
         clip.filename = tokens[i];
         clip.startTime = safeStof(tokens[i + 1]);
         clip.volume = safeStof(tokens[i + 2]);
 
         if (clip.startTime < 0) {
-            throw std::runtime_error("Start time cannot be negative: " + std::to_string(clip.startTime));
+            clip.startTime = 0;
         }
         if (clip.volume < 0) {
-            throw std::runtime_error("Volume cannot be negative: " + std::to_string(clip.volume));
+            clip.volume = 0;
         }
 
-        std::cout << "Clip: " << clip.filename
-            << ", Start: " << clip.startTime << "s"
-            << ", Volume: " << clip.volume << "\n";
+        std::printf("%s\t%.2f|%.2f\n", clip.filename.c_str(), clip.volume, clip.startTime);
         clips.push_back(clip);
     }
 
     return clips;
 }
 
+inline void showHelp(char* argv0)
+{
+    std::cerr << "Usage: " << argv0 << " <input.txt> [-o output.wav] [-s <sample rate> default:44100]\n";
+    std::printf("Input file must contain groups of 3: <wavfile> <starttime> <volume>\n.");
+}
 int main(int argc, char* argv[]) {
 #ifdef _WIN32
     system("chcp 65001 > nul");
 #endif
     int sampleRate = 44100;
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <input.txt> [-o <output file name> output.wav] [-s <sample rate> default:44100]\n";
-        for (int i = 1; i < argc - 1; ++i) {
-            const std::string arg = argv[i];
-            if (arg == "-h") {
-                std::printf("Input file must contain groups of 3: <wavfile> <starttime> <volume>\n.");
-                return 0;
-            }
-        }
+        showHelp(argv[0]);
+        return -1;
     }
 
     std::string txtFile = argv[1];
@@ -137,11 +137,16 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i < argc - 1; ++i) {
         const std::string arg = argv[i];
         if (arg == "-h") {
-            std::cerr << "Usage: " << argv[0] << " <input.txt> [-o output.wav] [-s <sample rate> default:44100]\n";
-            std::printf("Input file must contain groups of 3: <wavfile> <starttime> <volume>\n.");
+            showHelp(argv[0]);
             return 0;
         }
         else if (arg == "-o") {
+            if (i + 1 >= argc)
+            {
+                std::cerr << "Where is your output file?!\n";
+                return -1;
+
+            }
             outputFile = argv[i + 1];
         }
         else if (arg == "-s") {
@@ -155,7 +160,7 @@ int main(int argc, char* argv[]) {
     }
 
     try {
-        auto clips = parseInputFile(txtFile);
+        std::vector<struct AudioClip> clips = parseInputFile(txtFile);
         if (clips.empty()) {
             std::cerr << "No valid clips found.\n";
             return 1;
@@ -166,67 +171,73 @@ int main(int argc, char* argv[]) {
         audioFiles.reserve(clips.size());
 
         std::cout << "Loading and resampling audio files...\n";
-
-        for (const auto& clip : clips) {
+        int maxDuration = 0;
+        for (const AudioClip& clip : clips)
+        {
+            maxDuration = std::max(maxDuration, static_cast<int>(clip.startTime));
+        }
+        std::vector<std::vector<float>> buffer(2, std::vector<float>(maxDuration*sampleRate,.0f));
+        for (const AudioClip& clip : clips)
+        {
             AudioFile<float> audio;
-            if (!audio.load(clip.filename)) {  // ✅ 先加载
-                throw std::runtime_error("Failed to load: " + clip.filename);
+            if (!audio.load(clip.filename))
+            {
+                std::printf("Failed to load %s\n", clip.filename.c_str());
+                continue;
             }
+            const int originalSampleRate = audio.getSampleRate();
 
-            int originalSampleRate = audio.getSampleRate();
-            std::cout << "Loaded: " << clip.filename
-                << " (" << originalSampleRate << " Hz, "
-                << audio.getNumChannels() << " ch, "
-                << audio.getLengthInSeconds() << " s)\n";
-
-            // ✅ 重采样到目标采样率
-            if (originalSampleRate != sampleRate) {
-
-                std::cout << "Resampling " << clip.filename << " from " << originalSampleRate
-                    << " to " << sampleRate << " Hz\n";
-
-                for (int ch = 0; ch < audio.getNumChannels(); ++ch) {
+          
+            if (originalSampleRate != sampleRate)
+            {
+                std::printf("resampling.\n");
+                for (int ch = 0; ch < audio.getNumChannels(); ++ch)
+                {
                     resampleAudio(audio.samples[ch], originalSampleRate, sampleRate);
                 }
                 audio.setSampleRate(sampleRate); // 更新元数据
             }
-
-            size_t endSample = static_cast<size_t>((clip.startTime + audio.getLengthInSeconds()) * sampleRate);
-            maxEndSample = std::max(maxEndSample, endSample);
-            audioFiles.push_back(std::move(audio));
-        }
-
-        if (maxEndSample == 0) {
-            std::cerr << "No audio data to mix.\n";
-            return 1;
-        }
-
-        std::vector<std::vector<float>> buffer(2, std::vector<float>(maxEndSample, 0.0f));
-
-        for (size_t i = 0; i < clips.size(); ++i) {
-            const auto& clip = clips[i];
-            const auto& audio = audioFiles[i];
-            size_t startSample = static_cast<size_t>(clip.startTime * sampleRate);
-            int numChannels = audio.getNumChannels();
-            int numSamples = audio.getNumSamplesPerChannel();
-
-            std::cout << "(" << i << ") Mixing: " << clip.filename
-                << " at " << clip.startTime << "s (" << startSample << ")\n";
-
-            for (int ch = 0; ch < 2; ++ch) {
-                for (int j = 0; j < numSamples; ++j) {
-                    float sample = 0.0f;
-                    if (numChannels == 1) {
-                        sample = audio.samples[0][j];
-                    }
-                    else if (ch < numChannels) {
-                        sample = audio.samples[ch][j];
-                    }
-                    if (startSample + j < buffer[ch].size()) {
-                        buffer[ch][startSample + j] += sample * clip.volume; // ✅ 直接使用 clip.volume
-                    }
+            const float startTime = clip.startTime;
+            float endTime = clip.startTime + audio.getLengthInSeconds();
+            int startSampleinBuffer = static_cast<int>(std::round(startTime * sampleRate));
+            int endSampleinBuffer = std::floor(endTime * sampleRate);
+            std::printf("%s\t%.2fs vol:%.2f|%.2fs->%.2fs\n",clip.filename.c_str(), static_cast<float>(audio.getLengthInSeconds()), clip.volume, startTime, endTime);
+            if (endSampleinBuffer > buffer[0].size())
+            {
+                int newBufferSize =endSampleinBuffer;
+                std::printf("Resize buffer to %d(%d MiB)\n", newBufferSize, static_cast<int>(newBufferSize * sizeof(float) * 2) / 1048576);
+                for (std::vector<float>& b : buffer)
+                {
+                    b.resize(newBufferSize);
                 }
             }
+            if (audio.getNumChannels() == 1)
+            {
+                int count = 0;
+                for (int i = startSampleinBuffer; i < endSampleinBuffer; ++i)
+                {
+                    float sample= audio.samples[0][count] * clip.volume;
+                    buffer[0][i] += sample;
+                    buffer[1][i] += sample;
+                    ++count;
+                }
+
+            }
+            else
+            {
+                int count = 0;
+                for (int i = startSampleinBuffer; i < endSampleinBuffer; ++i)
+                {
+   
+                    buffer[0][i] += audio.samples[0][count] * clip.volume;
+                    buffer[1][i] += audio.samples[1][count] * clip.volume;
+                    ++count;
+                }
+
+                    assert(count == audio.getNumSamplesPerChannel());
+            }
+
+
         }
 
         // 裁剪末尾静音
