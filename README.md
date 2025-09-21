@@ -41,6 +41,7 @@ wavCompositorExtended <input.txt> [-o output.wav] [-s <sample_rate>] [-h]
 每三个参数一组：
 
 ```text
+#音频文件|开始时间|音量
 audio file with spaces.wav 0.0 1.0
 another.wav 2.5 0.8
 ```
