@@ -8,6 +8,7 @@
 #include <cctype>
 #include <stdexcept>
 #include <cmath>
+#include <cstring>
 
 //wavCompositorExtended
 
@@ -55,10 +56,46 @@ bool resampleAudio(std::vector<T>& input, int sr, int newsr) {
     return true;
 }
 
+
+static void resizeAudioBuffer(float*& buffer1, float*& buffer2, int& bufferSize, const int& newBufferSize)
+{
+    std::printf("Resizing...\n");
+
+    if (bufferSize > newBufferSize)
+    {
+        std::cerr << "Error: Current size (" << bufferSize
+            << ") is larger than new size (" << newBufferSize << ")\n";
+        return;
+    }
+
+    // 分配新缓冲区
+    float* newBuffer1 = new float[newBufferSize];
+    float* newBuffer2 = new float[newBufferSize];
+
+    // 复制旧数据
+    std::memcpy(newBuffer1, buffer1, bufferSize * sizeof(float));
+    std::memcpy(newBuffer2, buffer2, bufferSize * sizeof(float));
+
+    // 将新增部分清零
+    std::memset(newBuffer1 + bufferSize, 0, (newBufferSize - bufferSize) * sizeof(float));
+    std::memset(newBuffer2 + bufferSize, 0, (newBufferSize - bufferSize) * sizeof(float));
+
+    // 释放旧缓冲区
+    delete[] buffer1;
+    delete[] buffer2;
+
+    // 更新指针（通过引用，外部也会更新）
+    buffer1 = newBuffer1;
+    buffer2 = newBuffer2;
+
+    // 更新大小
+    bufferSize = newBufferSize;
+
+}
 struct AudioClip {
-    std::string filename;
-    float startTime;
-    float volume;
+    std::string filename="";
+    float startTime=0.0f;
+    float volume=.0f;
 };
 
 float safeStof(const std::string& str) {
@@ -116,7 +153,7 @@ std::vector<struct AudioClip> parseInputFile(const std::string& filename) {
     return clips;
 }
 
-inline void showHelp(char* argv0)
+inline static void showHelp(char* argv0)
 {
     std::cerr << "Usage: " << argv0 << " <input.txt> [-o output.wav] [-s <sample rate> default:44100]\n";
     std::printf("Input file must contain groups of 3: <wavfile> <starttime> <volume>\n.");
@@ -160,7 +197,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    try {
+    //try {
         std::vector<struct AudioClip> clips = parseInputFile(txtFile);
         if (clips.empty()) {
             std::cerr << "No valid clips found.\n";
@@ -177,7 +214,15 @@ int main(int argc, char* argv[]) {
         {
             maxDuration = std::max(maxDuration, static_cast<int>(clip.startTime));
         }
-        std::vector<std::vector<float>> buffer(2, std::vector<float>(maxDuration*sampleRate,.0f));
+        //std::vector<std::vector<float>> buffer(2, std::vector<float>(maxDuration*sampleRate,.0f));
+        int bufferSize = maxDuration * sampleRate;
+        //int bufferSize = 24;
+        float* buffer1 = new float[bufferSize];
+        float* buffer2 = new float[bufferSize];
+        float* buffer[] = { buffer1,buffer2 };
+        std::memset(buffer1, 0, bufferSize * sizeof(float));
+        std::memset(buffer2, 0, bufferSize * sizeof(float));
+
         for (const AudioClip& clip : clips)
         {
             AudioFile<float> audio;
@@ -203,37 +248,77 @@ int main(int argc, char* argv[]) {
             int startSampleinBuffer = static_cast<int>(std::round(startTime * sampleRate));
             int endSampleinBuffer = std::floor(endTime * sampleRate);
             std::printf("%s\t%.2fs vol:%.2f|%.2fs->%.2fs\n",clip.filename.c_str(), static_cast<float>(audio.getLengthInSeconds()), clip.volume, startTime, endTime);
-            if (endSampleinBuffer > buffer[0].size())
+            if (endSampleinBuffer > bufferSize)
             {
-                int newBufferSize =endSampleinBuffer;
+                int newBufferSize = endSampleinBuffer;
                 std::printf("Resize buffer to %d(%d MiB)\n", newBufferSize, static_cast<int>(newBufferSize * sizeof(float) * 2) / 1048576);
-                for (std::vector<float>& b : buffer)
-                {
-                    b.resize(newBufferSize);
-                }
+   
+
+
+                resizeAudioBuffer(buffer1, buffer2, bufferSize, newBufferSize);
+                buffer[0] = buffer1;
+                buffer[1] = buffer2;
             }
             if (audio.getNumChannels() == 1)
             {
                 int count = 0;
-                for (int i = startSampleinBuffer; i < endSampleinBuffer; ++i)
+                for (int i = startSampleinBuffer; i < endSampleinBuffer; ++i, ++count)
                 {
-                    float sample= audio.samples[0][count] * clip.volume;
-                    buffer[0][i] += sample;
-                    buffer[1][i] += sample;
-                    ++count;
+
+                    try
+                    {
+                        auto temp=audio.samples.at(0).at(count);
+                    }
+                    catch (const std::out_of_range& e)
+                    {
+                        std::cerr << " audio out of range\n" << e.what();
+                        break;
+                    }
+                    float sample = audio.samples.at(0).at(count) * clip.volume;
+                    while (i > bufferSize - 1)
+                    {
+                        resizeAudioBuffer(buffer1, buffer2, bufferSize, bufferSize * 2);
+                        buffer[0] = buffer1;
+                        buffer[1] = buffer2;
+                    }
+                     buffer[0][i] += sample;
+                     buffer[1][i] += sample;
+
+                    
                 }
 
             }
             else
             {
                 int count = 0;
-                for (int i = startSampleinBuffer; i < endSampleinBuffer; ++i)
+                for (int i = startSampleinBuffer; i < endSampleinBuffer; ++i, ++count)
                 {
+                    try
+                    {
+                        auto temp=audio.samples.at(0).at(count);
+                       temp= audio.samples.at(1).at(count);
+                    }
+                    catch (const std::out_of_range& e)
+
+                    {
+                        std::cerr << " audio out of range\n"<<e.what();
+                        break;
+                    }
+                    while (i > bufferSize - 1)
+                    {
    
-                    buffer[0][i] += audio.samples[0][count] * clip.volume;
-                    buffer[1][i] += audio.samples[1][count] * clip.volume;
-                    ++count;
+
+
+                        resizeAudioBuffer(buffer1, buffer2, bufferSize, bufferSize * 2);  
+                        buffer[0] = buffer1;
+                        buffer[1] = buffer2;
+                    }
+                   buffer[0][i] += audio.samples.at(0).at(count) * clip.volume;
+                   buffer[1][i] += audio.samples.at(1).at(count) * clip.volume;
+ 
+
                 }
+
 
                     //assert(count == audio.getNumSamplesPerChannel());
             }
@@ -241,55 +326,60 @@ int main(int argc, char* argv[]) {
 
         }
 
+        ;
         // 裁剪末尾静音
-        size_t lastNonZero = 0;
-        for (size_t i = buffer[0].size(); i > 0; --i) {
-            if (std::abs(buffer[0][i - 1]) > 1e-6f || std::abs(buffer[1][i - 1]) > 1e-6f) {
+        buffer[0] = buffer1;
+        buffer[1] = buffer2;
+        int lastNonZero = 0;
+        for (int i = bufferSize; i > 0; --i) {
+            if (buffer[0][i] == 0 && buffer[1][i] == 0) {
                 lastNonZero = i;
                 break;
             }
         }
         if (lastNonZero > 0) {
-            buffer[0].resize(lastNonZero);
-            buffer[1].resize(lastNonZero);
+            bufferSize = lastNonZero;
+            //buffer[0].resize(lastNonZero);
+            //buffer[1].resize(lastNonZero);
         }
 
         // 归一化
         float maxVal = 0.0f;
-        for (const auto& channel : buffer) {
-            for (float s : channel) {
-                maxVal = std::max(maxVal, std::abs(s));
+        for (int i = 0; i < bufferSize;++i) {
+                
+            maxVal = std::max(maxVal, std::abs(buffer[0][i]));
+            maxVal = std::max(maxVal, std::abs(buffer[1][i]));
             }
-        }
         if (maxVal > 1.0f) {
             float gain = 1.0f / maxVal;
-            for (auto& channel : buffer) {
-                for (float& s : channel) {
-                    s *= gain;
-                }
+            for (int i = 0; i < bufferSize; ++i) {
+                buffer[0][i] *= gain;
+                buffer[1][i] *= gain;   
             }
             std::cout << "Normalized audio (max = " << maxVal << ") -> gain = " << gain << "\n";
         }
 
         AudioFile<float> result;
-        result.setAudioBuffer(buffer);
+        std::vector<std::vector<float>> bufferasVector = { std::vector<float>(buffer[0],buffer[0] +bufferSize),std::vector<float>(buffer[1],buffer[1]+bufferSize) };
+
+        result.setAudioBuffer(bufferasVector);
         result.setSampleRate(sampleRate);
         result.setBitDepth(16);
 
         if (result.save(outputFile)) {
             std::cout << "Saved to " << outputFile << " ("
-                << buffer[0].size() / sampleRate << " seconds)\n";
+                << bufferasVector[0].size() / sampleRate << " seconds)\n";
         }
         else {
             std::cerr << "Failed to save: " << outputFile << "\n";
             return 1;
         }
 
-    }
-    catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
-        return 1;
-    }
+    //}
+    //catch (const std::exception& e) {
+    //    std::cerr << "Error: " << e.what() << std::endl;
+    //    return 1;
+    //}
 
     return 0;
 }
