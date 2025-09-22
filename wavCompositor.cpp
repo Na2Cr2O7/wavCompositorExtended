@@ -162,7 +162,7 @@ int main(int argc, char* argv[]) {
 #ifdef _WIN32
     system("chcp 65001 > nul");
 #endif
-    std::cout << "wavCompositorExtended1.12\n";
+    std::cout << "wavCompositorExtended2.0\n";
     int sampleRate = 44100;
     if (argc < 2) {
         showHelp(argv[0]);
